@@ -1,0 +1,17 @@
+peft
+transformers
+thefuzz
+tyro
+stable-baselines3
+minigrid
+crafter
+torch==2.0.1 
+torchvision==0.15.2
+numpy<2
+stable-baselines3==2.1.0 
+gymnasium==0.29.1
+transformers==4.32.0 
+accelerate==0.21.0 
+bitsandbytes==0.41.1 
+peft==0.4.0 
+scipy

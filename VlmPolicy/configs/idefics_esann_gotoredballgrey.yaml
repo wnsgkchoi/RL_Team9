@@ -1,0 +1,144 @@
+# hydra configuration.
+# use to set the esperiments arguments.
+# if you are looking for the distributed setup arguments, they are in the accelerate config.
+
+hydra:
+  run:
+    dir: ../outputs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+    # the directory where the hydra logging will take place
+suppress_warnings: True
+# set True if you don't want warnings
+debug: True
+#the name of this experiment
+seed: 3234
+#seed of the experiment
+reseed_env: True
+#if true 10 variations of the same env are sampled
+torch_deterministic: True
+#if toggled, `torch.backends.cudnn.deterministic=False`
+track: True
+#if toggled, this experiment will be tracked with Weights and Biases
+wandb_project_name: "frozenlake_idefics"
+#the wandb's project name
+wandb_entity: null #'rl-team' 
+#the entity (team) of wandb's project
+wandb_log_dir: "${now:%Y-%m-%d_%H-%M-%S}"
+#the dir where wandb saves the logs
+save_video: True
+#whether to capture videos of the agent performances (check out `videos` folder)
+save_video_every: 20
+#if save_video is true this is the number of episodes between a recording and the following one
+save_stats: True
+#whether to save training stats
+save_episode: False
+#whether to save the episode
+env_size: 244
+#the size of the obs space. 64 means (64x64x3). use 244 to adapt to IDEFICS image dimansions
+env_area: 8
+#the area of the world.
+num_prompt_images: 1
+#the number of images to use in the prompt (right now only 0 and 1 supported)
+use_text_description: True 
+#wether or not to use the textual description of the world state.
+
+# Algorithm specific arguments
+model: "HuggingFaceM4/idefics-9b-instruct" #"HuggingFaceM4/idefics-9b-instruct" "HuggingFaceM4/idefics-9b-instruct" "HuggingFaceM4/tiny-random-idefics" "CNN"
+#the string identifying the model to use
+model_ckpt: null
+#if a path to a accelerate ckpt is provided, it will be loaded
+is_slippery: False 
+#true means that the frozen lake has to be slippery
+fixed_orientation: False
+#if True the environment is always oriented with the north direction meaning the upper part of the image.
+#if False the agent direction is considered north.
+no_step_description: False
+# if true the agent sees only indication if an object is far or directly near him
+first_person: True
+# if true every information is given in first person (the user)
+fov: 1
+#field of view. 1 means that the env descriptions show objects at a maximum distance of one from the agent.
+
+total_timesteps: 400000
+#total timesteps of the experiments
+disable_training: False
+#run in inference
+from_accelerate_savestate_to_checkpoint: False
+#dummy flag to load the checkpoint of a trained model and save it as checkpoint that can be loaded by from_pretrained
+learning_rate: 1e-5
+#the learning rate of the optimizer
+critic_learning_rate: 1e-5
+#the specific learning rate for the critic network
+local_num_envs: 2
+#the number of parallel game environments (per process)
+num_steps: 128
+#the number of steps to run in each environment per policy rollout
+anneal_lr: False
+#Toggle learning rate annealing for policy and value networks
+gamma: 0.99
+#the discount factor gamma
+gae_lambda: 0.95
+#the lambda for the general advantage estimation
+num_minibatches: 128
+#the number of mini-batches
+update_epochs: 1
+#the K epochs to update the policy
+norm_adv: True
+#Toggles advantages normalization (BE AWARE that using the smalles batch requires False.)
+clip_coef: 0.1
+#the surrogate clipping coefficient
+clip_vloss: True
+#Toggles whether or not to use a clipped loss for the value function, as per the paper.
+ent_coef: 0.01 #0.01
+#coefficient of the entropy
+vf_coef: 0.5
+#coefficient of the value function
+max_grad_norm: 0.5
+#the maximum norm for the gradient clipping
+target_kl: null
+#the target KL divergence threshold
+save_every: 50
+#take a checkpoint avery time after this amount of iterations. (1 iteration = num_envs * num_steps = 1 batch)
+gradient_accumulation: 4
+#do gradient accumulation with this amount of iterations.
+adam_epsilon: 1e-8
+#the adam epsilon parameter. Default is 1e-8
+gradient_ckpt: False
+#use gradient checkpointing if possible to save memory at speed cost
+lora: True
+#use lora for finetuning
+temperature: 'max_logit'
+#temperature used to scale the action logits
+disable_adapters_for_generation: True
+#when generating actions use the base model, without lora weights.
+normalization_by_words: False
+# normalize log probabilities with the number of words in each action
+action_logits_from_whole_seq: True
+# compute the action logits from the entire prompt, not from just the action tokens.
+advanced_action_matching: False
+# use a more sophisticated action matching
+env_id: "BabyAI-GoToRedBallGrey-v0"  # MiniGrid-LavaGapS7-v0
+#the id of the environment
+generate_actions: False
+#if the model is used to generate actions
+value_prompt_template: "I am the agent in this minigrid world. Possible game actions are:\n- move forward\n- pick up\n- move left\n- move right\n- move back.\n{}\nWhat's the next best action?"
+#the template used as system prompt to give context to the agent. Remember to add {} within the template to indicate exactly where to inject the state information.
+action_template: " Based on the information provided, the next best action would be to {}"
+#the template used for actions. Remember to add {} within the template to indicate exactly where to inject the game action.
+possible_actions_list: "forward pickup opt_left opt_right opt_back"
+# all actions: left right forward pickup drop toggle done opt_left opt_right opt_back
+# useful in minigrid to filter out the unecessary actions
+
+# eval seed
+seed_eval: 1234
+eval_interval: 2000
+#evaluate every time after this amount of iterations. (1 iteration = num_envs * num_steps = 1 batch)
+num_eval_episodes: 5
+#the number of episodes to use during evaluation
+
+# to be filled at runtime
+batch_size: 0
+#the batch size (computed at runtime)
+minibatch_size: 0
+#the mini-batch size (computed at runtime)
+num_iterations: 0
+#the number of iterations (computed at runtime)
