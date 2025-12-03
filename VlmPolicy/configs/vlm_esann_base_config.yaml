@@ -8,6 +8,8 @@ hydra:
     # the directory where the hydra logging will take place
 suppress_warnings: True
 # set True if you don't want warnings
+gpu_device: null
+#the gpu device to use
 debug: True
 #the name of this experiment
 seed: <seed>

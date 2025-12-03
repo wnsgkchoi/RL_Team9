@@ -40,6 +40,9 @@ from environments.minigrid_env import make_minigrid_env
 from PIL import Image
 
 def evaluate_policy(agent, *, env, num_eval_episodes, accelerator):
+    """
+    여러 episode에 대해 agent의 평균 return과 st.dev를 계산
+    """
     all_returns = []
     agent.eval()
     
@@ -263,6 +266,9 @@ def train(args):
         import warnings
         warnings.filterwarnings("ignore")
 
+    if "gpu_device" in args and args.gpu_device is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_device)
+
     #set tokenizer parallelization to false to avoid deadlocks
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
@@ -485,6 +491,12 @@ def train(args):
             ### TRAINING 
             
             # bootstrap value if not done
+            """
+            Using GAE to compute Advantages and Returns
+            1) delta_t = r_t + gamma * V(s_{t+1}) - V(s_t)
+            2) A_t = delta_t + gamma * lambda * (1 - done) * A_{t+1}
+            3) R_t = A_t + V(s_t)
+            """
             with torch.no_grad():
                 next_value = agent.get_value(next_obs, 
                                             value_prompt_template=args.value_prompt_template,
@@ -521,6 +533,25 @@ def train(args):
             #set the agent in train mode to run ppo
             agent.network.train()
             agent.critic.train()
+
+            """
+            코드가 꽤 더럽다. 기존의 레포지토리를 그대로 불러왔는데, 이거 리팩토링을 해야 하나..?
+            Using PPO to optimize the policy and value network
+
+            1) ratio = pi_theta(a|s) / pi_theta_old(a|s)
+            2) clipfracs = mean( 1 if |ratio -1| > clip_coef else 0 )
+            3) pg_loss = mean( -advantage * ratio )  # policy gradient loss
+               pg_loss_clip = mean( -advantage * clip(ratio, 1 - clip_coef, 1 + clip_coef) )  # clipped policy gradient
+               pg_loss = mean( max(pg_loss, pg_loss_clip) )
+            4) v_loss = mean( (R - V(s))^2 )
+               v_loss_clip = mean( (clip(V(s), V_old(s) - clip_coef, V_old(s) + clip_coef) - R)^2 )
+               v_loss = mean( max(v_loss, v_loss_clip) )
+            5) entropy_loss = mean( entropy(pi_theta(.|s)) )
+            6) loss = pg_loss - ent_coef * entropy_loss + vf_coef * v_loss
+            7) update theta using Adam optimizer
+            8) if KL > target_kl: break
+            9) repeat for K epochs
+            """
 
             for epoch in range(args.update_epochs):
                 np.random.shuffle(b_inds)

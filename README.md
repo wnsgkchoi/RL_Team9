@@ -63,8 +63,8 @@ All scripts should be run from the `VlmPolicy/src` directory.
 To train an agent (e.g., IDEFICS) using PPO:
 
 ```bash
-cd VlmPolicy/src
-python ppo_crafter_parallel.py --config-name idefics_esann_base_config
+# To assign proper GPU in manual
+simple_gpu_scheduler --gpus [gpu] < train_ppo.txt
 ```
 
 ### 2. Inference / Evaluation
@@ -95,3 +95,9 @@ You can override parameters via command line, e.g.:
 ```bash
 python ppo_crafter_parallel.py --config-name idefics_esann_base_config total_timesteps=100000
 ```
+
+## 📖 References  
+
+[Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)  
+[High-Dimensional Continuous Control Using Generalized Advantage Estimation](https://arxiv.org/abs/1506.02438)  
+
