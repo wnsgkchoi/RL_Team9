@@ -26,3 +26,12 @@ PPO는 기본적으로 online 상황을 가정하는 것으로 알고 있다. �
 - 그런데 사실 slip을 false로 하면, 학습이 어려운 문제가 아니라서 이렇게 한다고 성능이 크게 좋아질 지는 의문.  
 - 어쩌면 homework의 게임들을 가져와서 코드를 돌리는 것은 어땠을지.  
 
+
+
+이미 학습된 VLM + LoRA를 agent로 사용한다. FrozenLake는 action이 4개니까, 총 4개의 action에 대한 확률값을 VLM으로부터 받고, 이를 softmax를 해서 Categorical dist를 만들고, 여기에서 action을 sampling.
+
+VLM에게 넘겨지는 정보:
+- 이미지: `frozen_env.py`의 `make_frozen_env` 함수에서, FrozenLake의 상태를 `rgb_array` 모드로 렌더링한 뒤, `VisualObsWrapper`를 통해 (244, 244) 크기의 이미지로 리사이징하여 모델에 넘김.
+- 텍스트: value_prompt_template 에 있는 탬플릿 기반.  
+
++ reward matrix를 생성한 뒤 soft prompting을 통해 LLM에게 넘겨준다면?  
