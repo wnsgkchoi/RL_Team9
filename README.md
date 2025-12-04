@@ -64,7 +64,7 @@ To train an agent (e.g., IDEFICS) using PPO:
 
 ```bash
 # To assign proper GPU in manual
-simple_gpu_scheduler --gpus [gpu] < train_ppo.txt
+simple_gpu_scheduler --gpus 7 < scripts/train_ppo.txt
 ```
 
 ### 2. Inference / Evaluation

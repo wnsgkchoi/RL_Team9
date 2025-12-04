@@ -35,3 +35,6 @@ VLM에게 넘겨지는 정보:
 - 텍스트: value_prompt_template 에 있는 탬플릿 기반.  
 
 + reward matrix를 생성한 뒤 soft prompting을 통해 LLM에게 넘겨준다면?  
+
+![alt text](image.png)  
+![alt text](image-1.png)
