@@ -1,1 +1,0 @@
-/data7/choi0425/anaconda3/envs/crafter_env/bin/python VlmPolicy/src/ppo_crafter_parallel.py --config-name idefics_esann_base_config

@@ -20,13 +20,14 @@ from accelerate import Accelerator
 
 from agents.base_agent import BaseAgent
 
-accelerator = Accelerator()
+# accelerator = Accelerator() # Removed global accelerator
 
 class IDEFICSAgent(nn.Module, BaseAgent):
     def __init__(
-        self, checkpoint_name, action_enum, is_lora=False, padding_side="left", num_prompt_images=1, use_text_description=False, gradient_ckpt=False
+        self, checkpoint_name, action_enum, is_lora=False, padding_side="left", num_prompt_images=1, use_text_description=False, gradient_ckpt=False, accelerator=None
     ):
         super().__init__()
+        self.accelerator = accelerator
         # self.local_num_envs = local_num_envs
         self.num_prompt_images = num_prompt_images
         self.use_text_description = use_text_description
@@ -216,12 +217,25 @@ class IDEFICSAgent(nn.Module, BaseAgent):
             bnb_4bit_use_double_quant=True,
             llm_int8_skip_modules=["lm_head", "embed_tokens"],
         )
+        
+        # Determine device map
+        device_map = None
+        if self.accelerator is not None:
+            device_map = {"": f"cuda:{self.accelerator.local_process_index}"}
+
         # load the model first on the main process to download it if required.
         # the other processes will use the cached one
-        with accelerator.main_process_first():
+        # Use self.accelerator if available, otherwise fallback (though it should be provided)
+        if self.accelerator:
+            context = self.accelerator.main_process_first()
+        else:
+            from contextlib import nullcontext
+            context = nullcontext()
+
+        with context:
             config = AutoConfig.from_pretrained(checkpoint)
             model = IdeficsForVisionText2Text.from_pretrained(
-                checkpoint, quantization_config=quantization_config, #device_map='auto'
+                checkpoint, quantization_config=quantization_config, device_map=device_map
             )
             processor = AutoProcessor.from_pretrained(checkpoint, padding_side=padding_side)
         

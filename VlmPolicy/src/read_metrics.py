@@ -7,6 +7,7 @@ import common
 def get_frozen_lake_stats(filename):
   rewards = []
   lengths = []
+  success_count = 0
   metrics = {}
   for line in filename.read_text().split('\n'):
     if not line.strip():
@@ -14,10 +15,13 @@ def get_frozen_lake_stats(filename):
     episode = json.loads(line)
     lengths.append(episode['length'])
     rewards.append(episode['reward'])
+    if episode['reward'] >= 3.0:  # Assuming 3.0 is the reward for success
+        success_count += 1
   
   metrics['Length'] = np.mean(np.array(lengths))
   metrics['Reward'] = np.mean(np.array(rewards))
   metrics['Cumulative_Reward'] = np.sum(np.array(rewards))
+  metrics['Success_Count'] = success_count
   return metrics
 
 def read_stats_live(file_path, task, method, verbose=False, is_crafter=True):

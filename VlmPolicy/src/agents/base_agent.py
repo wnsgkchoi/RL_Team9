@@ -15,7 +15,9 @@ class BaseAgent:
         raise NotImplementedError("Subclasses must implement get_action_and_value method.")
 
     @torch.no_grad()
-    def predict(self, x):
-        output = self.get_action_and_value(x, action=None, text_description=[None]*x.shape[0])
+    def predict(self, x, text_description=None):
+        if text_description is None:
+            text_description = [None]*x.shape[0]
+        output = self.get_action_and_value(x, action=None, text_description=text_description)
         action = output['action_logits'].argmax(dim=-1)
         return action

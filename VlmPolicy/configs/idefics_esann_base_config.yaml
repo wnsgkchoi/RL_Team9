@@ -28,7 +28,7 @@ wandb_log_dir: "${now:%Y-%m-%d_%H-%M-%S}"
 #the dir where wandb saves the logs
 save_video: True
 #whether to capture videos of the agent performances (check out `videos` folder)
-save_video_every: 20
+save_video_every: 5
 #if save_video is true this is the number of episodes between a recording and the following one
 save_stats: True
 #whether to save training stats
@@ -62,7 +62,7 @@ first_person: True
 fov: 1
 #field of view. 1 means that the env descriptions show objects at a maximum distance of one from the agent.
 
-total_timesteps: 400000
+total_timesteps: 20480
 #total timesteps of the experiments
 disable_training: False
 #run in inference
@@ -72,7 +72,7 @@ learning_rate: 1e-5
 #the learning rate of the optimizer
 critic_learning_rate: 1e-5
 #the specific learning rate for the critic network
-local_num_envs: 4
+local_num_envs: 16
 #the number of parallel game environments (per process)
 num_steps: 128
 #the number of steps to run in each environment per policy rollout
@@ -82,17 +82,17 @@ gamma: 0.99
 #the discount factor gamma
 gae_lambda: 0.95
 #the lambda for the general advantage estimation
-num_minibatches: 128
+num_minibatches: 256
 #the number of mini-batches
 update_epochs: 1
 #the K epochs to update the policy
 norm_adv: True
 #Toggles advantages normalization (BE AWARE that using the smalles batch requires False.)
-clip_coef: 0.1
+clip_coef: 0.2
 #the surrogate clipping coefficient
 clip_vloss: True
 #Toggles whether or not to use a clipped loss for the value function, as per the paper.
-ent_coef: 0.01 #0.01
+ent_coef: 0.1 #0.1
 #coefficient of the entropy
 vf_coef: 0.5
 #coefficient of the value function
@@ -100,7 +100,7 @@ max_grad_norm: 0.5
 #the maximum norm for the gradient clipping
 target_kl: null
 #the target KL divergence threshold
-save_every: 50
+save_every: 500
 #take a checkpoint avery time after this amount of iterations. (1 iteration = num_envs * num_steps = 1 batch)
 gradient_accumulation: 4
 #do gradient accumulation with this amount of iterations.
@@ -134,9 +134,9 @@ possible_actions_list: "forward pickup toggle opt_left opt_right opt_back"
 
 # eval seed
 seed_eval: 1234
-eval_interval: 2000
+eval_interval: 1
 #evaluate every time after this amount of iterations. (1 iteration = num_envs * num_steps = 1 batch)
-num_eval_episodes: 5
+num_eval_episodes: 1
 #the number of episodes to use during evaluation
 
 # to be filled at runtime

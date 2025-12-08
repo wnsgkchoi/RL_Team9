@@ -21,7 +21,7 @@ class FrozenActions(Enum):
     move_north = "move north"
 
 
-class FrozenLakeText(FrozenLakeEnv):    
+class FrozenLakeTextPenalty(FrozenLakeEnv):    
     """Wrapper for the FrozenLake environment that returns text observations."""
     metadata = {'render_modes': ['rgb_array'], 'render_fps': 30}
     def __init__(self, map_size=8, fov=3, fixed_orientation=False, is_slippery=True, seed=0, first_person=False):
@@ -119,9 +119,11 @@ class FrozenLakeText(FrozenLakeEnv):
         
         # Custom Reward Shaping
         if done and reward == 0:  # Fell into a hole (Trap)
-            reward = -1.0
+            reward = -0.5
         elif done and reward == 1:  # Reached the goal
             reward = 10.0
+        else:
+            reward = -0.01 # Step penalty
             
         self.last_action = action
         
@@ -190,7 +192,7 @@ class StatsRecorder(Wrapper):
         self._file.flush()
 
 
-def make_frozen_env(
+def make_frozen_env_penalty(
     outdir,
     area=8, # 8x8
     fov=1,
@@ -210,15 +212,9 @@ def make_frozen_env(
         return obs
     
     def frozen_thunk():
-        frozen_env = gym.make('FrozenLakeText-v0', map_size=area, is_slippery=is_slippery, seed=seed, fov=fov, fixed_orientation=fixed_orientation, max_episode_steps=100, first_person=first_person)
+        frozen_env = gym.make('FrozenLakeText-Penalty-v0', map_size=area, is_slippery=is_slippery, seed=seed, fov=fov, fixed_orientation=fixed_orientation, max_episode_steps=100, first_person=first_person)
         frozen_env = VisualObsWrapper(frozen_env, transform=resize_obs)
         if save_video:
-            # Save video every 'save_video_every' episodes. 
-            # Since we want to save once after each policy update, and policy update happens every 512 steps (approx 5 episodes),
-            # setting save_video_every to a small number like 5 or 10 would work.
-            # However, the user asked for "exactly once after each policy update".
-            # The current implementation uses episode count for triggering video recording.
-            # To align with policy updates, we can approximate.
             frozen_env = RecordVideo(frozen_env, video_folder=outdir, episode_trigger=lambda ix: ix % save_video_every == 0)
         if save_stats:
             frozen_env = StatsRecorder(frozen_env, stat_folder=outdir)

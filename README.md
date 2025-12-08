@@ -25,6 +25,7 @@ To run the code in `VlmPolicy`, you need to set up a specific Conda environment 
 
 ```bash
 git clone <URL>
+git cd CSED627
 ```
 
 ### 1. Create Conda Environment
@@ -63,9 +64,22 @@ All scripts should be run from the `VlmPolicy/src` directory.
 To train an agent (e.g., IDEFICS) using PPO:
 
 ```bash
-# To assign proper GPU in manual
-simple_gpu_scheduler --gpus 7 < scripts/train_ppo.txt
+CUDA_VISIBLE_DEVICES=6 python VlmPolicy/src/ppo_crafter_parallel_v2.py --config-name idefics_esann_base_config gpu_device=6
 ```
+
+If you want to run the code in multi-gpu environment, please use this command
+```bash
+CUDA_VISIBLE_DEVICES=0,1 NCCL_P2P_DISABLE=1 accelerate launch --main_process_port 29501 --num_processes 2 VlmPolicy/src/CUDA_VISIBLE_DEVICES=4,5 NCCL_P2P_DISABLE=1 accelerate launch --main_process_port 29501 --num_processes 2 VlmPolicy/src/
+```
+
+or, use this command (move penalty)
+```bash
+CUDA_VISIBLE_DEVICES=7 python VlmPolicy/src/ppo_crafter_parallel_v2.py \
+    --config-name idefics_esann_base_config \
+    gpu_device=7 \
+    env_id=FrozenLakeText-Penalty-v0
+```
+
 
 ### 2. Inference / Evaluation
 To evaluate a trained model or run inference:
