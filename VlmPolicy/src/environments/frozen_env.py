@@ -119,9 +119,13 @@ class FrozenLakeText(FrozenLakeEnv):
         
         # Custom Reward Shaping
         if done and reward == 0:  # Fell into a hole (Trap)
-            reward = -1.0
+            reward = -20.0
+            info['is_success'] = False
         elif done and reward == 1:  # Reached the goal
-            reward = 10.0
+            reward = 20.0
+            info['is_success'] = True
+        else:
+            info['is_success'] = False
             
         self.last_action = action
         
@@ -181,7 +185,8 @@ class StatsRecorder(Wrapper):
         self._reward += reward
         done = terminated or truncated
         if done:
-            self._stats = {'length': self._length, 'reward': round(self._reward, 1)}
+            is_success = info.get('is_success', False)
+            self._stats = {'length': self._length, 'reward': round(self._reward, 1), 'is_success': is_success}
             self._save()
         return obs, reward, terminated, truncated, info
 

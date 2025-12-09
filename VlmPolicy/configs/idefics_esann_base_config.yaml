@@ -72,9 +72,9 @@ learning_rate: 1e-5
 #the learning rate of the optimizer
 critic_learning_rate: 1e-5
 #the specific learning rate for the critic network
-local_num_envs: 16
+local_num_envs: 8     # 16
 #the number of parallel game environments (per process)
-num_steps: 128
+num_steps: 128        # 128
 #the number of steps to run in each environment per policy rollout
 anneal_lr: False
 #Toggle learning rate annealing for policy and value networks
@@ -82,7 +82,7 @@ gamma: 0.99
 #the discount factor gamma
 gae_lambda: 0.95
 #the lambda for the general advantage estimation
-num_minibatches: 256
+num_minibatches: 128   # 256
 #the number of mini-batches
 update_epochs: 1
 #the K epochs to update the policy
@@ -136,7 +136,7 @@ possible_actions_list: "forward pickup toggle opt_left opt_right opt_back"
 seed_eval: 1234
 eval_interval: 1
 #evaluate every time after this amount of iterations. (1 iteration = num_envs * num_steps = 1 batch)
-num_eval_episodes: 1
+num_eval_episodes: 4
 #the number of episodes to use during evaluation
 
 # to be filled at runtime

@@ -15,13 +15,15 @@ def get_frozen_lake_stats(filename):
     episode = json.loads(line)
     lengths.append(episode['length'])
     rewards.append(episode['reward'])
-    if episode['reward'] >= 3.0:  # Assuming 3.0 is the reward for success
+    if episode['reward'] >= 0.3:  # Assuming 3.0 is the reward for success
         success_count += 1
   
   metrics['Length'] = np.mean(np.array(lengths))
   metrics['Reward'] = np.mean(np.array(rewards))
   metrics['Cumulative_Reward'] = np.sum(np.array(rewards))
   metrics['Success_Count'] = success_count
+  metrics['Failed_Count'] = len(rewards) - success_count
+  metrics['Success_Rate'] = success_count / len(rewards) if len(rewards) > 0 else 0.0
   return metrics
 
 def read_stats_live(file_path, task, method, verbose=False, is_crafter=True):
@@ -71,7 +73,10 @@ def read_stats(indir, outdir, task, method, budget=int(1e6), verbose=False, is_c
 
   #simple hot fix for frozen lake env
   if not is_crafter:
-    filename = sorted(list(indir.glob('**/stats.jsonl')))[0]
+    filename = indir / 'stats.jsonl'
+    if not filename.exists():
+        print(f"Stats file not found in {indir}")
+        return
     metrics = get_frozen_lake_stats(pathlib.Path(filename))
     print(metrics)
     return

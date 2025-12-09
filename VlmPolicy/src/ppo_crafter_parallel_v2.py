@@ -36,29 +36,120 @@ from agents.QWen_agent import QWenAgent
 from environments.crafter_env import make_crafter_env
 from environments.frozen_env import make_frozen_env
 from environments.frozen_env_penalty import make_frozen_env_penalty
+from environments.frozen_env_potential import make_frozen_env_potential
 from environments.hanoi_env import make_hanoi_env
 from environments.minigrid_env import make_minigrid_env
 from PIL import Image
 
-def evaluate_policy(agent, *, env, num_eval_episodes, accelerator):
+def evaluate_policy(agent, *, env_creation_fn, num_eval_episodes, accelerator, run_name, eval_count, args):
     """
-    여러 episode에 대해 agent의 평균 return과 st.dev를 계산
+    Evaluates the agent on a vectorized environment.
+    Ensures exactly one episode is collected from each environment in the vectorized env.
     """
-    all_returns = []
     agent.eval()
+    env = env_creation_fn()
+    num_envs = env.num_envs
     
-    for _ in range(num_eval_episodes):
-        ep_return = 0
-        obs, info = env.reset()
-        done = False
-        while not done:
-            text_obs = [info.get('obs', None)]
-            action = agent.predict(torch.tensor(obs, device=accelerator.device).unsqueeze(0), text_description=text_obs)
-            obs, reward, done, truncated, info = env.step(action.squeeze(0).cpu().numpy())
-            done = done or truncated
-            ep_return += reward
-        all_returns.append(ep_return)
-    return np.mean(all_returns), np.std(all_returns)
+    # We want exactly one episode from each environment
+    # Since num_eval_episodes is set to num_envs (e.g. 16), we can just track which envs have finished.
+    finished_envs = np.zeros(num_envs, dtype=bool)
+    episode_rewards = [0.0] * num_envs
+    episode_successes = [False] * num_envs
+    current_rewards = np.zeros(num_envs)
+    
+    # Logging setup
+    logs_dir = os.path.join("/data7/choi0425/workspace/CSED627/logs", run_name)
+    os.makedirs(logs_dir, exist_ok=True)
+    log_files = [open(os.path.join(logs_dir, f"eval{eval_count}_{i}.txt"), "w") for i in range(num_envs)]
+    
+    obs, info = env.reset()
+    
+    pbar = tqdm(total=num_envs, desc="Evaluating", disable=not accelerator.is_main_process)
+    
+    step_count = 0
+    # Loop until all environments have finished at least one episode
+    while not np.all(finished_envs):
+        # info['obs'] is expected to be a list/array of strings from the vectorized env
+        text_obs = info.get('obs')
+        if isinstance(text_obs, np.ndarray):
+            text_obs = text_obs.tolist()
+        
+        # Predict
+        with torch.no_grad():
+            res = agent.get_action_and_value(
+                torch.tensor(obs, device=accelerator.device), 
+                text_description=text_obs,
+                value_prompt_template=args.value_prompt_template,
+                action_template=args.action_template,
+                generate_actions=args.generate_actions,
+                normalization_by_words=args.normalization_by_words,
+                action_logits_from_whole_seq=args.action_logits_from_whole_seq,
+                advanced_action_matching=args.advanced_action_matching
+            )
+        
+        action = res['action']
+        
+        # Log VLM outputs
+        if 'action_logits' in res:
+            action_logits = res['action_logits']
+            # Move to CPU safely
+            try:
+                action_logits_cpu = action_logits.float().cpu()
+                probs = torch.nn.functional.softmax(action_logits_cpu, dim=-1)
+                
+                for i in range(num_envs):
+                    if not finished_envs[i]: # Only log if not finished
+                        log_files[i].write(f"Step: {step_count}\n")
+                        log_files[i].write(f"Env {i} State:\n{text_obs[i]}\n")
+                        log_files[i].write(f"Action Logits: {action_logits_cpu[i].tolist()}\n")
+                        log_files[i].write(f"Action Probs: {probs[i].tolist()}\n")
+                        log_files[i].write(f"Selected Action: {action[i].item()}\n")
+                        log_files[i].write("-" * 50 + "\n")
+                        log_files[i].flush()
+            except Exception as e:
+                print(f"[Error] Failed to log VLM outputs: {e}")
+        
+        # Step
+        obs, reward, done, truncated, info = env.step(action.cpu().numpy())
+        
+        current_rewards += reward
+        step_count += 1
+        
+        # Check for completed episodes
+        for i in range(num_envs):
+            if (done[i] or truncated[i]) and not finished_envs[i]:
+                episode_rewards[i] = current_rewards[i]
+                
+                # Check success from info
+                # SyncVectorEnv wraps info in 'final_info' for finished envs
+                is_success = False
+                if 'final_info' in info and info['final_info'][i] is not None:
+                     is_success = info['final_info'][i].get('is_success', False)
+                elif 'is_success' in info: # Fallback if not wrapped or different structure
+                     is_success = info['is_success'][i]
+                
+                episode_successes[i] = is_success
+
+                # Log termination info
+                log_files[i].write(f"Episode Finished at Step {step_count}\n")
+                log_files[i].write(f"Total Reward: {current_rewards[i]}\n")
+                log_files[i].write(f"Success: {is_success}\n")
+                log_files[i].write("-" * 50 + "\n")
+                log_files[i].flush()
+                
+                finished_envs[i] = True
+                pbar.update(1)
+                
+                # Reset current reward for this env (though we ignore subsequent steps)
+                current_rewards[i] = 0
+    
+    for f in log_files:
+        f.close()
+    pbar.close()
+    
+    env.close()
+    
+    return np.mean(episode_rewards), np.mean(episode_successes), np.sum(episode_successes)
 
 
 def augment_args_with_distributed_setup_variables(args):
@@ -166,7 +257,7 @@ def instanciate_envs(runs_directory, is_main_process, specifc_env_seed, **kwargs
                             seed=i+1+specifc_env_seed,
                             max_steps=1) for i in range(kwargs['local_num_envs'])],
         )
-        eval_env = None
+        eval_env_creation_fn = None
     elif kwargs['env_id'] in ["Hanoi3Disk-v0", "Hanoi4Disk-v0"]:
         envs = gym.vector.SyncVectorEnv(
             [
@@ -178,7 +269,7 @@ def instanciate_envs(runs_directory, is_main_process, specifc_env_seed, **kwargs
                 for i in range(kwargs['local_num_envs'])
             ]
         )
-        eval_env = None
+        eval_env_creation_fn = None
     elif "MiniGrid" in kwargs['env_id'] or "BabyAI" in kwargs['env_id']:
         envs = gym.vector.SyncVectorEnv(
             [
@@ -198,7 +289,7 @@ def instanciate_envs(runs_directory, is_main_process, specifc_env_seed, **kwargs
                 for i in range(kwargs['local_num_envs'])
             ]
         )
-        eval_env = None
+        eval_env_creation_fn = None
     elif kwargs['env_id'] == "FrozenLakeText-v0":
         envs = gym.vector.SyncVectorEnv(
             [make_frozen_env(
@@ -217,16 +308,22 @@ def instanciate_envs(runs_directory, is_main_process, specifc_env_seed, **kwargs
             for i in range(kwargs['local_num_envs'])
             ]
         )
-        eval_env = make_frozen_env(runs_directory,
-                                area=kwargs['env_area'],
-                                fov=kwargs['fov'],
-                                size=(kwargs['env_size'], kwargs['env_size']),
-                                is_slippery=kwargs['is_slippery'],
-                                fixed_orientation=kwargs['fixed_orientation'],
-                                seed=kwargs['seed_eval'],
-                                save_video=kwargs['save_video'] and is_main_process,
-                                save_video_every=1, # Save every episode in eval env
-                                save_stats=False)()
+        eval_env_creation_fn = lambda: gym.vector.SyncVectorEnv(
+            [make_frozen_env(
+                os.path.join(runs_directory, f'eval_video_{i}'),
+                area=kwargs['env_area'],
+                fov=kwargs['fov'],
+                size=(kwargs['env_size'], kwargs['env_size']),
+                is_slippery=kwargs['is_slippery'],
+                fixed_orientation=kwargs['fixed_orientation'],
+                seed=kwargs['seed_eval'] + i,
+                save_video=kwargs['save_video'] and is_main_process,
+                save_video_every=1000000, # Save only the first episode (since we recreate env)
+                save_stats=False
+            )
+            for i in range(kwargs['local_num_envs'])
+            ]
+        )
     elif kwargs['env_id'] == "FrozenLakeText-Penalty-v0":
         envs = gym.vector.SyncVectorEnv(
             [make_frozen_env_penalty(
@@ -245,19 +342,61 @@ def instanciate_envs(runs_directory, is_main_process, specifc_env_seed, **kwargs
             for i in range(kwargs['local_num_envs'])
             ]
         )
-        eval_env = make_frozen_env_penalty(runs_directory,
-                                area=kwargs['env_area'],
-                                fov=kwargs['fov'],
-                                size=(kwargs['env_size'], kwargs['env_size']),
-                                is_slippery=kwargs['is_slippery'],
-                                fixed_orientation=kwargs['fixed_orientation'],
-                                seed=kwargs['seed_eval'],
-                                save_video=kwargs['save_video'] and is_main_process,
-                                save_video_every=1, # Save every episode in eval env
-                                save_stats=False)()
+        eval_env_creation_fn = lambda: gym.vector.SyncVectorEnv(
+            [make_frozen_env_penalty(
+                os.path.join(runs_directory, f'eval_video_{i}'),
+                area=kwargs['env_area'],
+                fov=kwargs['fov'],
+                size=(kwargs['env_size'], kwargs['env_size']),
+                is_slippery=kwargs['is_slippery'],
+                fixed_orientation=kwargs['fixed_orientation'],
+                seed=kwargs['seed_eval'] + i,
+                save_video=kwargs['save_video'] and is_main_process,
+                save_video_every=1000000, # Save only the first episode
+                save_stats=False
+            )
+            for i in range(kwargs['local_num_envs'])
+            ]
+        )
+    elif kwargs['env_id'] == "FrozenLakeText-Potential-v0":
+        envs = gym.vector.SyncVectorEnv(
+            [make_frozen_env_potential(
+                runs_directory,
+                area=kwargs['env_area'], # 8x8,
+                fov=kwargs['fov'],
+                seed=specifc_env_seed + i + 1,
+                size=(kwargs['env_size'], kwargs['env_size']),
+                is_slippery=kwargs['is_slippery'],
+                fixed_orientation=kwargs['fixed_orientation'],
+                save_video=False,
+                save_video_every=kwargs['save_video_every'],
+                save_stats=kwargs['save_stats'],
+                first_person=kwargs['first_person'],
+                gamma=kwargs['gamma']
+            )
+            for i in range(kwargs['local_num_envs'])
+            ]
+        )
+        eval_env_creation_fn = lambda: gym.vector.SyncVectorEnv(
+            [make_frozen_env_potential(
+                os.path.join(runs_directory, f'eval_video_{i}'),
+                area=kwargs['env_area'],
+                fov=kwargs['fov'],
+                size=(kwargs['env_size'], kwargs['env_size']),
+                is_slippery=kwargs['is_slippery'],
+                fixed_orientation=kwargs['fixed_orientation'],
+                seed=kwargs['seed_eval'] + i,
+                save_video=kwargs['save_video'] and is_main_process,
+                save_video_every=1000000, # Save only the first episode
+                save_stats=False,
+                gamma=kwargs['gamma']
+            )
+            for i in range(kwargs['local_num_envs'])
+            ]
+        )
     else:
         raise Exception(f'Environment {kwargs["env_id"]} is not supported')
-    return envs, eval_env
+    return envs, eval_env_creation_fn
 
 def save_initial_env_states(envs, save_dir, process_index=0):
     """Save initial environment states as images"""
@@ -288,6 +427,25 @@ def save_initial_env_states(envs, save_dir, process_index=0):
                     save_path = os.path.join(save_dir, f"process_{process_index}_env_{env_idx}_initial.png")
                     img.save(save_path)
                     print(f"Saved initial environment state to {save_path}")
+            
+            # Save Potential Map if available (for FrozenLakeText-Potential-v0)
+            if hasattr(current_env, '_get_potential') and hasattr(current_env, 'nrow') and hasattr(current_env, 'ncol'):
+                potential_map_path = os.path.join(save_dir, f"process_{process_index}_env_{env_idx}_potential_map.txt")
+                with open(potential_map_path, 'w') as f:
+                    f.write(f"Potential Map for Env {env_idx}\n")
+                    if hasattr(current_env, 'goal'):
+                        f.write(f"Goal Position: {current_env.goal}\n")
+                    f.write("-" * 30 + "\n")
+                    
+                    for r in range(current_env.nrow):
+                        row_potentials = []
+                        for c in range(current_env.ncol):
+                            s = r * current_env.ncol + c
+                            pot = current_env._get_potential(s)
+                            row_potentials.append(f"{pot:5.1f}")
+                        f.write(" ".join(row_potentials) + "\n")
+                print(f"Saved potential map to {potential_map_path}")
+
         except Exception as e:
             print(f"Could not save environment {env_idx}: {e}")
 
@@ -375,7 +533,7 @@ def train(args):
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     # ENVIRONMENTS creation
-    envs, eval_env = instanciate_envs(runs_directory, accelerator.is_main_process, seed, **args)
+    envs, eval_env_creation_fn = instanciate_envs(runs_directory, accelerator.is_main_process, seed, **args)
     # dummy variable used later to flag for specific crafter logging
     is_crafter = True if args.env_id == "CrafterReward-v1" else False
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
@@ -476,6 +634,8 @@ def train(args):
     initial_temperature = 0.5
     final_temperature = 0.01
     
+    eval_count = 0
+    
     for iteration in tqdm(range(1, args.num_iterations + 1)):
         
         # Calculate current temperature
@@ -506,6 +666,9 @@ def train(args):
 
         total_action_match_found_in_iteration = 0
         total_truncations_in_iteration = 0
+        
+        # Track success rate for this iteration
+        iteration_successes = []
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
@@ -547,6 +710,19 @@ def train(args):
             total_truncations_in_iteration += truncations.sum()
             next_text_obs = infos.get('obs', [None]*args.local_num_envs)
             
+            # Track success
+            if 'final_info' in infos:
+                for i, info in enumerate(infos['final_info']):
+                    if info is not None:
+                        is_success = info.get('is_success', False)
+                        iteration_successes.append(is_success)
+            elif 'is_success' in infos:
+                 # If SyncVectorEnv doesn't wrap in final_info (depends on version/wrapper)
+                 # But usually it does. If not, we check terminations.
+                 for i in range(args.local_num_envs):
+                     if terminations[i] or truncations[i]:
+                         iteration_successes.append(infos['is_success'][i])
+
             if args.debug:
                 if 'final_observation' in infos: #do not log all the image array
                     del infos['final_observation']
@@ -728,6 +904,14 @@ def train(args):
                 writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
                 writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
                 writer.add_scalar("losses/explained_variance", explained_var, global_step)
+            
+            # Calculate iteration success rate
+            if len(iteration_successes) > 0:
+                train_success_rate = sum(iteration_successes) / len(iteration_successes)
+                train_success_count = sum(iteration_successes)
+                writer.add_scalar("charts/train_success_rate", train_success_rate, global_step)
+                writer.add_scalar("charts/train_success_count", train_success_count, global_step)
+
             writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
             writer.add_scalar("charts/total_action_match_found_in_iteration", total_action_match_found_in_iteration, global_step)
             writer.add_scalar("charts/truncations", total_truncations_in_iteration, global_step)
@@ -764,10 +948,13 @@ def train(args):
 
             if iteration % args.eval_interval == 0:
                 accelerator.print(f"Evaluating the model at global step: {global_step=}")
-                if eval_env is not None:
-                    avg_return, _ = evaluate_policy(agent, env=eval_env, num_eval_episodes=args.num_eval_episodes, accelerator=accelerator)
+                if eval_env_creation_fn is not None:
+                    eval_count += 1
+                    avg_return, eval_success_rate, eval_success_count = evaluate_policy(agent, env_creation_fn=eval_env_creation_fn, num_eval_episodes=args.num_eval_episodes, accelerator=accelerator, run_name=run_name, eval_count=eval_count, args=args)
                     writer.add_scalar("charts/eval_avg_return", avg_return, global_step)
-                    accelerator.print(f"Evaluation finished at global step: {global_step}, {avg_return=}")
+                    writer.add_scalar("charts/eval_success_rate", eval_success_rate, global_step)
+                    writer.add_scalar("charts/eval_success_count", eval_success_count, global_step)
+                    accelerator.print(f"Evaluation finished at global step: {global_step}, {avg_return=}, {eval_success_rate=}")
                 else:
                     print(f'[Warning]: no evaluation environment specified for env {args.env_id}. Skipping evaluation...')
 

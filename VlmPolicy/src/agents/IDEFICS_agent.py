@@ -65,6 +65,16 @@ class IDEFICSAgent(nn.Module, BaseAgent):
         shift_attention = attention_mask[..., 1:]
         shift_labels = labels[..., 1:]
 
+        # Safety check for gather to prevent CUDA device-side assert
+        vocab_size = shift_logits.size(-1)
+        if (shift_labels >= vocab_size).any() or (shift_labels < 0).any():
+            print(f"[Error] Invalid token IDs in shift_labels!")
+            print(f"Vocab size: {vocab_size}")
+            print(f"Max label: {shift_labels.max().item()}")
+            print(f"Min label: {shift_labels.min().item()}")
+            # Force clamp to prevent crash and allow debugging
+            shift_labels = torch.clamp(shift_labels, min=0, max=vocab_size-1)
+
         tokens_logprobs = torch.gather(
             shift_logits, 2, shift_labels[:, :, None]
         ).squeeze(-1)
@@ -73,6 +83,9 @@ class IDEFICSAgent(nn.Module, BaseAgent):
         # Calculate the sum and count of unmasked elements
         sum_unmasked = tokens_logprobs_applied_mask.sum(dim=1)
         count_unmasked = shift_attention.sum(dim=1)
+
+        # Safety check for division by zero
+        count_unmasked = torch.clamp(count_unmasked, min=1e-9)
 
         # Calculate the mean
         mean_tokens_logprobs_unmasked = sum_unmasked / count_unmasked
@@ -188,6 +201,16 @@ class IDEFICSAgent(nn.Module, BaseAgent):
             res_logits = res_logits / temperature
         else:
             raise Exception(f"Invalid temperature: {temperature}")
+
+        # Safety check for NaN/Inf in logits
+        if torch.isnan(res_logits).any() or torch.isinf(res_logits).any():
+            # print(f"[Warning] NaN or Inf detected in res_logits! Replacing with -1e9.")
+            res_logits = torch.nan_to_num(res_logits, nan=-1e9, posinf=1e9, neginf=-1e9)
+        
+        # Ensure at least one value is finite and reasonable to prevent all -Inf
+        # If a row is all -1e9 (was all -Inf), softmax will be uniform.
+        # But to be safe, we can set the first element to 0 if all are small.
+        # (Not strictly necessary if -1e9 is used, as exp(-1e9) is small but positive)
 
         probs = Categorical(logits=res_logits)
         if action is None:

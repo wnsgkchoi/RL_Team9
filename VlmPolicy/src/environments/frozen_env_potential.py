@@ -21,10 +21,10 @@ class FrozenActions(Enum):
     move_north = "move north"
 
 
-class FrozenLakeTextPenalty(FrozenLakeEnv):    
-    """Wrapper for the FrozenLake environment that returns text observations."""
+class FrozenLakeTextPotential(FrozenLakeEnv):    
+    """Wrapper for the FrozenLake environment that returns text observations and uses Potential-based Reward Shaping."""
     metadata = {'render_modes': ['rgb_array'], 'render_fps': 30}
-    def __init__(self, map_size=8, fov=3, fixed_orientation=False, is_slippery=True, seed=0, first_person=False):
+    def __init__(self, map_size=8, fov=3, fixed_orientation=False, is_slippery=True, seed=0, first_person=False, gamma=0.99):
         desc = generate_random_map(size=map_size, seed=seed)
         super().__init__(desc=desc, is_slippery=is_slippery, render_mode='rgb_array')
         self.seed = seed
@@ -32,6 +32,7 @@ class FrozenLakeTextPenalty(FrozenLakeEnv):
         self.fixed_orientation = fixed_orientation
         self.is_slippery = is_slippery
         self.first_person = first_person
+        self.gamma = gamma # Discount factor for potential shaping
 
         self.action_enum = FrozenActions
 
@@ -53,6 +54,13 @@ class FrozenLakeTextPenalty(FrozenLakeEnv):
     def _get_pos(self, s):
         return np.array([s % self.ncol, self.nrow - (s // self.ncol) - 1])
     
+    def _get_potential(self, s):
+        """Calculate potential phi(s) = -Distance(s, goal)"""
+        pos = self._get_pos(s)
+        # Manhattan distance
+        dist = np.abs(pos - self.goal).sum()
+        return -dist
+
     def _get_entity_desc(self, entity_pos, title):
         pos = self._get_pos(self.s)
         entity_alpha = np.angle((entity_pos - pos) @ np.array([1, 1j]))
@@ -117,16 +125,26 @@ class FrozenLakeTextPenalty(FrozenLakeEnv):
         
         obs, reward, done, truncated, info = super().step(action)
         
-        # Custom Reward Shaping
+        # Base Reward (R_env)
         if done and reward == 0:  # Fell into a hole (Trap)
-            reward = -5.0
+            r_env = -20.0
             info['is_success'] = False
         elif done and reward == 1:  # Reached the goal
-            reward = 10.0
+            r_env = 10.0
             info['is_success'] = True
         else:
-            reward = -0.01 # Step penalty
+            r_env = 0.0 # No explicit step penalty, shaping handles it
             info['is_success'] = False
+            
+        # Potential-based Reward Shaping
+        # F = gamma * phi(s') - phi(s)
+        phi_t = self._get_potential(self.prev_s)
+        phi_t1 = self._get_potential(self.s)
+        
+        shaping = self.gamma * phi_t1 - phi_t
+        
+        # Total Reward
+        reward = r_env + shaping
             
         self.last_action = action
         
@@ -145,7 +163,10 @@ class FrozenLakeTextPenalty(FrozenLakeEnv):
         info['obs'] = self._get_text_obs()
         self.history.append(info['obs'])
         info['history'] = self._get_history()
-        self.history.pop(0)
+        
+        # Add shaping info for debugging
+        info['shaping_reward'] = shaping
+        info['base_reward'] = r_env
         
         return obs, reward, done, truncated, info
     
@@ -196,7 +217,7 @@ class StatsRecorder(Wrapper):
         self._file.flush()
 
 
-def make_frozen_env_penalty(
+def make_frozen_env_potential(
     outdir,
     area=8, # 8x8
     fov=1,
@@ -207,7 +228,8 @@ def make_frozen_env_penalty(
     save_video_every=100,
     seed=None,
     save_stats=False,
-    first_person=True
+    first_person=True,
+    gamma=0.99
 ):   
     def resize_obs(obs):
         obs = torch.from_numpy(obs).permute(2, 0, 1)
@@ -216,7 +238,7 @@ def make_frozen_env_penalty(
         return obs
     
     def frozen_thunk():
-        frozen_env = gym.make('FrozenLakeText-Penalty-v0', map_size=area, is_slippery=is_slippery, seed=seed, fov=fov, fixed_orientation=fixed_orientation, max_episode_steps=100, first_person=first_person)
+        frozen_env = gym.make('FrozenLakeText-Potential-v0', map_size=area, is_slippery=is_slippery, seed=seed, fov=fov, fixed_orientation=fixed_orientation, max_episode_steps=100, first_person=first_person, gamma=gamma)
         frozen_env = VisualObsWrapper(frozen_env, transform=resize_obs)
         if save_video:
             frozen_env = RecordVideo(frozen_env, video_folder=outdir, episode_trigger=lambda ix: ix % save_video_every == 0)
