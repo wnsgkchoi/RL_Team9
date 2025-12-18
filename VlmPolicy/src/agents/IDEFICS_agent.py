@@ -126,10 +126,10 @@ class IDEFICSAgent(nn.Module, BaseAgent):
     def get_value(self, x, value_prompt_template='{}', text_description=None, **kwargs):
         return self.get_action_and_value_one_forward(x, action=None, just_value=True, value_prompt_template=value_prompt_template, text_description=text_description)
 
-    def get_action_and_value(self, x, value_prompt_template='{}', action_template='{}', action=None, text_description=None, temperature=1.0, **kwargs):
-        return self.get_action_and_value_one_forward(x, action=action, just_value=False, value_prompt_template=value_prompt_template, action_template=action_template, text_description=text_description, temperature=temperature)
+    def get_action_and_value(self, x, value_prompt_template='{}', action_template='{}', action=None, text_description=None, temperature=1.0, deterministic=False, **kwargs):
+        return self.get_action_and_value_one_forward(x, action=action, just_value=False, value_prompt_template=value_prompt_template, action_template=action_template, text_description=text_description, temperature=temperature, deterministic=deterministic)
 
-    def get_action_and_value_one_forward(self, x, action=None, just_value=False, value_prompt_template='{}', action_template='{}', text_description=None, temperature=1.0):
+    def get_action_and_value_one_forward(self, x, action=None, just_value=False, value_prompt_template='{}', action_template='{}', text_description=None, temperature=1.0, deterministic=False):
         output = {"actions": None, "log_prob": None, "entropy": None, "values": None}
 
         # step in common for actions and values computation
@@ -214,7 +214,10 @@ class IDEFICSAgent(nn.Module, BaseAgent):
 
         probs = Categorical(logits=res_logits)
         if action is None:
-            action = probs.sample()
+            if deterministic:
+                action = torch.argmax(res_logits, dim=-1)
+            else:
+                action = probs.sample()
 
         output["action"] = action
         output["log_prob"] = probs.log_prob(action)

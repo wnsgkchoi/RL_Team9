@@ -74,7 +74,7 @@ critic_learning_rate: 1e-5
 #the specific learning rate for the critic network
 local_num_envs: 8     # 16
 #the number of parallel game environments (per process)
-num_steps: 128        # 128
+num_steps: 256        # 128
 #the number of steps to run in each environment per policy rollout
 anneal_lr: False
 #Toggle learning rate annealing for policy and value networks
@@ -82,7 +82,7 @@ gamma: 0.99
 #the discount factor gamma
 gae_lambda: 0.95
 #the lambda for the general advantage estimation
-num_minibatches: 128   # 256
+num_minibatches: 256   # 256
 #the number of mini-batches
 update_epochs: 1
 #the K epochs to update the policy

@@ -1,6 +1,7 @@
 import json
 import pathlib
 from enum import Enum
+from collections import deque
 
 import gymnasium as gym
 import numpy as np
@@ -33,6 +34,7 @@ class FrozenLakeTextPotential(FrozenLakeEnv):
         self.is_slippery = is_slippery
         self.first_person = first_person
         self.gamma = gamma # Discount factor for potential shaping
+        self.size = map_size
 
         self.action_enum = FrozenActions
 
@@ -50,16 +52,53 @@ class FrozenLakeTextPotential(FrozenLakeEnv):
         self.walls += [np.array([self.ncol, y]) for y in range(-1, self.nrow+1)]
         self.walls += [np.array([x, -1]) for x in range(self.ncol)]
         self.walls += [np.array([x, self.nrow]) for x in range(self.ncol)]        
-    
+        
+        # Pre-calculate BFS distances for Potential
+        self._compute_bfs_potential()
+
+    def _compute_bfs_potential(self):
+        """Compute shortest path distance from every cell to the goal using BFS."""
+        self.bfs_distance_map = np.full((self.nrow, self.ncol), fill_value=self.nrow * self.ncol, dtype=np.float32)
+        
+        # Find goal coordinates (row, col)
+        goal_indices = np.where(self.desc == b'G')
+        if len(goal_indices[0]) == 0:
+            return # Should not happen
+        goal_r, goal_c = goal_indices[0][0], goal_indices[1][0]
+        
+        queue = deque([(goal_r, goal_c, 0)])
+        visited = set([(goal_r, goal_c)])
+        self.bfs_distance_map[goal_r, goal_c] = 0
+        
+        while queue:
+            r, c, dist = queue.popleft()
+            
+            # Check 4 directions
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                
+                if 0 <= nr < self.nrow and 0 <= nc < self.ncol:
+                    if (nr, nc) not in visited and self.desc[nr, nc] != b'H':
+                        visited.add((nr, nc))
+                        self.bfs_distance_map[nr, nc] = dist + 1
+                        queue.append((nr, nc, dist + 1))
+
     def _get_pos(self, s):
         return np.array([s % self.ncol, self.nrow - (s // self.ncol) - 1])
     
     def _get_potential(self, s):
-        """Calculate potential phi(s) = -Distance(s, goal)"""
-        pos = self._get_pos(s)
-        # Manhattan distance
-        dist = np.abs(pos - self.goal).sum()
-        return -dist
+        """Calculate potential phi(s) = -BFS_Distance(s, goal)"""
+        # Convert state s to (row, col)
+        row = s // self.ncol
+        col = s % self.ncol
+        
+        dist = self.bfs_distance_map[row, col]
+        
+        # Normalize to [0, 1] range roughly, using max possible path
+        # A safe upper bound for normalization is size * size
+        norm_dist = dist / (self.nrow * self.ncol)
+        
+        return -norm_dist
 
     def _get_entity_desc(self, entity_pos, title):
         pos = self._get_pos(self.s)
@@ -127,13 +166,13 @@ class FrozenLakeTextPotential(FrozenLakeEnv):
         
         # Base Reward (R_env)
         if done and reward == 0:  # Fell into a hole (Trap)
-            r_env = -20.0
+            r_env = -1.0
             info['is_success'] = False
         elif done and reward == 1:  # Reached the goal
-            r_env = 10.0
+            r_env = 1.0
             info['is_success'] = True
         else:
-            r_env = 0.0 # No explicit step penalty, shaping handles it
+            r_env = -0.01 # Small step penalty to encourage shorter paths
             info['is_success'] = False
             
         # Potential-based Reward Shaping

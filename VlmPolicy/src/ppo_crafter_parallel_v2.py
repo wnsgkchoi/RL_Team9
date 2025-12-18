@@ -84,7 +84,8 @@ def evaluate_policy(agent, *, env_creation_fn, num_eval_episodes, accelerator, r
                 generate_actions=args.generate_actions,
                 normalization_by_words=args.normalization_by_words,
                 action_logits_from_whole_seq=args.action_logits_from_whole_seq,
-                advanced_action_matching=args.advanced_action_matching
+                advanced_action_matching=args.advanced_action_matching,
+                deterministic=True
             )
         
         action = res['action']
@@ -442,7 +443,7 @@ def save_initial_env_states(envs, save_dir, process_index=0):
                         for c in range(current_env.ncol):
                             s = r * current_env.ncol + c
                             pot = current_env._get_potential(s)
-                            row_potentials.append(f"{pot:5.1f}")
+                            row_potentials.append(f"{pot:6.3f}")
                         f.write(" ".join(row_potentials) + "\n")
                 print(f"Saved potential map to {potential_map_path}")
 

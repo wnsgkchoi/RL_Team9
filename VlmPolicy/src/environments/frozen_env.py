@@ -119,10 +119,10 @@ class FrozenLakeText(FrozenLakeEnv):
         
         # Custom Reward Shaping
         if done and reward == 0:  # Fell into a hole (Trap)
-            reward = -20.0
+            reward = -1.0
             info['is_success'] = False
         elif done and reward == 1:  # Reached the goal
-            reward = 20.0
+            reward = 1.0
             info['is_success'] = True
         else:
             info['is_success'] = False
