@@ -35,6 +35,7 @@ You MUST return the result in **JSON format**, as a single valid JSON object and
 The JSON must contain:
 - The grid size (number of rows and columns)
 - The reward values as a 2D matrix (a JSON list of lists of numbers)
+- The grid size MUST BE "8 x 8"
 
 Use the following schema:
 
