@@ -41,6 +41,9 @@ from environments.hanoi_env import make_hanoi_env
 from environments.minigrid_env import make_minigrid_env
 from PIL import Image
 
+from variables.reward_map import reward_maps
+
+
 def evaluate_policy(agent, *, env_creation_fn, num_eval_episodes, accelerator, run_name, eval_count, args):
     """
     Evaluates the agent on a vectorized environment.
@@ -625,11 +628,68 @@ def train(args):
     next_text_obs = infos.get('obs', [None]*args.local_num_envs)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.local_num_envs).to(device)
+
+    from reward_evaluator.reward_evaluator import RewardEvaluator
+    evaluator = RewardEvaluator(reasoning_effort = "medium")
     
     # Save initial environment states
     if accelerator.is_main_process:
         initial_env_save_dir = os.path.join(runs_directory, 'initial_env_states')
         save_initial_env_states(envs, initial_env_save_dir, process_index=accelerator.process_index)
+
+        if args.reward_map == "GPT":
+            # Directory for reward map cache
+            reward_map_cache_dir = os.path.join(runs_directory, 'reward_map_cache')
+            os.makedirs(reward_map_cache_dir, exist_ok=True)
+            
+            # Try to load cached reward maps
+            loaded = reward_maps.load_from_file(reward_map_cache_dir, process_index=accelerator.process_index)
+            
+            # Generate missing reward maps
+            generated_count = 0
+            for env_idx in range(envs.num_envs):
+                if not reward_maps.has_reward_map(env_idx):
+                    print(f"[RewardMap] Generating reward map for env {env_idx} using GPT...")
+                    image_path = os.path.join(
+                        initial_env_save_dir,
+                        f"process_{accelerator.process_index}_env_{env_idx}_initial.png"
+                    )
+                    # rewards = evaluator.run(
+                    #     image_path, 
+                    #     grid_size=(args.env_area, args.env_area)
+                    # )
+
+                    text_map = envs[env_idx].render_map_ascii(return_string=True)
+
+                    rewards = evaluator.run_text(
+                        text_map=text_map,
+                        grid_size=(args.env_area, args.env_area)
+                    )
+                    
+                    # Validate and log reward map
+                    print(f"[RewardMap] Env {env_idx} - Shape: {len(rewards)}x{len(rewards[0])}")
+                    rewards_array = np.array(rewards)
+                    print(f"[RewardMap] Env {env_idx} - Stats: min={rewards_array.min():.3f}, max={rewards_array.max():.3f}, mean={rewards_array.mean():.3f}")
+                    
+                    # Check for invalid values
+                    if np.isnan(rewards_array).any():
+                        print(f"[WARNING] Env {env_idx} - NaN values detected in reward map! Replacing with 0")
+                        rewards = np.nan_to_num(rewards_array, nan=0.0).tolist()
+                    if np.isinf(rewards_array).any():
+                        print(f"[WARNING] Env {env_idx} - Inf values detected in reward map! Clipping")
+                        rewards = np.clip(rewards_array, -1.0, 1.0).tolist()
+                    
+                    reward_maps.set_reward_map(env_idx, rewards)
+                    generated_count += 1
+                else:
+                    print(f"[RewardMap] Using cached reward map for env {env_idx}")
+            
+            # Save reward maps if any were newly generated
+            if generated_count > 0:
+                print(f"[RewardMap] Generated {generated_count} new reward maps. Saving to cache...")
+                reward_maps.save_to_file(reward_map_cache_dir, process_index=accelerator.process_index)
+            else:
+                print(f"[RewardMap] All {envs.num_envs} reward maps loaded from cache.")
 
     # Temperature Annealing Configuration
     initial_temperature = 0.5

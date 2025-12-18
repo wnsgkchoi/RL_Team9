@@ -62,6 +62,8 @@ first_person: True
 fov: 1
 #field of view. 1 means that the env descriptions show objects at a maximum distance of one from the agent.
 
+reward_map: "None"  # "None" or "GPT" or "Manual"
+
 total_timesteps: 20480
 #total timesteps of the experiments
 disable_training: False

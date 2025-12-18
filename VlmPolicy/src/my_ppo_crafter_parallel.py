@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.distributed as dist a
+import torch.distributed as dist
 import wandb
 
 from omegaconf import OmegaConf
