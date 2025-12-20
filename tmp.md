@@ -5,6 +5,7 @@
 |env|process|size|run time|
 |-|-|-|-|
 |naive|direct|8|21:24 * 100|
+|gpt|direct|8|15:50 * 100|
 |Manual|direct|8|20:43 * 100|
 |naive|curriculum|4|22:18 * 100|
 |naive|curriculum|6|??:?? * 100| 
@@ -12,6 +13,11 @@
 |manual|curriculum|4|23:14 * 100|
 |manual|curriculum|6| * 100|
 |manual|curriculum|8|21:55 * 100|
+|gpt|curriculum|4| * 100|
+|gpt|curriculum|6| * 100|
+|gpt|curriculum|8| * 100|
+
+
 
 ### Appendix: Commands
 

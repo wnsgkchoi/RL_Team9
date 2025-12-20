@@ -126,7 +126,7 @@ class RewardEvaluator:
 
         # Create generation input with image and prompt
         gen_input = GenerationInput(
-            text_prompt=REWARD_EVALUATION_PROMPT(self.discount_factor),
+            text_prompt=REWARD_EVALUATION_PROMPT(self.discount_factor, grid_size if grid_size else (4, 4)),
             system_prompt=REWARD_EVALUATION_SYSTEM_PROMPT,
             image_paths=[image_path]
         )
@@ -160,7 +160,8 @@ class RewardEvaluator:
     def run_text(
         self,
         text_map: str,
-        grid_size: Optional[Tuple[int, int]] = None
+        grid_size: Optional[Tuple[int, int]] = None,
+        max_retries: int = 3
     ) -> List[List[float]]:
         """
         Evaluate reward values for each cell in the grid map.
@@ -169,6 +170,7 @@ class RewardEvaluator:
             image_path: Path to the map image file
             grid_size: Optional tuple of (rows, cols) if known. If not provided,
                       will be extracted from the model's response.
+            max_retries: Number of retries if parsing fails
 
         Returns:
             A 2D list of reward values with the same dimensions as the map grid.
@@ -180,7 +182,7 @@ class RewardEvaluator:
         """
         # Create generation input with image and prompt
         gen_input = GenerationInput(
-            text_prompt=REWARD_EVALUATION_PROMPT(self.discount_factor),
+            text_prompt=REWARD_EVALUATION_PROMPT(self.discount_factor, grid_size if grid_size else (4, 4)),
             system_prompt=REWARD_EVALUATION_SYSTEM_PROMPT,
             text_map=text_map
         )
@@ -193,21 +195,30 @@ class RewardEvaluator:
         # Call the model
         print(f"[RewardEvaluator] Using reasoning effort: {self.reasoning_effort}")
 
-        output, metadata = self.model.infer(gen_input, parameters)
+        for attempt in range(max_retries):
+            try:
+                print(f"[RewardEvaluator] Attempt {attempt+1}/{max_retries}")
+                output, metadata = self.model.infer(gen_input, parameters)
 
-        # Print metadata for debugging
-        if metadata.api_usage:
-            print(f"[RewardEvaluator] API Usage:")
-            print(f"  Input tokens: {metadata.api_usage.input_tokens}")
-            print(f"  Output tokens: {metadata.api_usage.output_tokens}")
-            print(f"  Estimated cost: ${metadata.api_usage.estimated_cost_usd:.4f}")
+                # Print metadata for debugging
+                if metadata.api_usage:
+                    print(f"[RewardEvaluator] API Usage:")
+                    print(f"  Input tokens: {metadata.api_usage.input_tokens}")
+                    print(f"  Output tokens: {metadata.api_usage.output_tokens}")
+                    print(f"  Estimated cost: ${metadata.api_usage.estimated_cost_usd:.4f}")
 
-        # Parse the response
-        rewards = self._parse_response(output.text, grid_size)
+                # Parse the response
+                rewards = self._parse_response(output.text, grid_size)
 
-        print(f"[RewardEvaluator] Successfully extracted reward matrix of size {len(rewards)}x{len(rewards[0])}")
+                print(f"[RewardEvaluator] Successfully extracted reward matrix of size {len(rewards)}x{len(rewards[0])}")
 
-        return rewards
+                return rewards
+            
+            except Exception as e:
+                print(f"[RewardEvaluator] Attempt {attempt+1} failed: {e}")
+                if attempt == max_retries - 1:
+                    raise e
+                time.sleep(1) # Wait before retry
 
 
     def _parse_response(

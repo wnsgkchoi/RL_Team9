@@ -1,0 +1,15 @@
+# Configuration for ChatGPT-5 model
+
+# Local directory name for model storage
+local_dirname: "chatgpt5"
+
+# Remote server port
+remote_port: 8000
+
+# Model-specific settings
+model_settings:
+  api_endpoint: "https://api.openai.com/v1/chat/completions"
+  model_name: "gpt-5"
+  max_tokens: 2048
+  temperature: 0.7
+

@@ -1,0 +1,11 @@
+# Base configuration for MLLM models
+
+# Path where models are stored
+models_path: "./models"
+
+# Default settings
+default_settings:
+  max_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+

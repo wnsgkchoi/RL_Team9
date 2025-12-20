@@ -27,7 +27,7 @@ class FrozenActions(Enum):
 class FrozenLakeTextGPT(FrozenLakeEnv):    
     """Wrapper for the FrozenLake environment that returns text observations and uses Potential-based Reward Shaping."""
     metadata = {'render_modes': ['rgb_array'], 'render_fps': 30}
-    def __init__(self, map_size=8, fov=3, fixed_orientation=False, is_slippery=True, seed=0, first_person=False, gamma=0.99):
+    def __init__(self, map_size=8, fov=3, fixed_orientation=False, is_slippery=True, seed=0, first_person=False, gamma=0.99, reward_map="GPT", env_idx=-1):
         desc = generate_random_map(size=map_size, seed=seed)
         super().__init__(desc=desc, is_slippery=is_slippery, render_mode='rgb_array')
         self.seed = seed
@@ -37,6 +37,8 @@ class FrozenLakeTextGPT(FrozenLakeEnv):
         self.first_person = first_person
         self.gamma = gamma # Discount factor for potential shaping
         self.size = map_size
+        self.reward_map = reward_map
+        self.env_idx = env_idx
 
         self.action_enum = FrozenActions
 
@@ -182,6 +184,9 @@ class FrozenLakeTextGPT(FrozenLakeEnv):
         # phi_t = self._get_potential(self.prev_s)
         # phi_t1 = self._get_potential(self.s)
 
+        raw_reward = 0.0
+        raw_prev_reward = 0.0
+
         if self.reward_map == "GPT" and self.env_idx != -1:
             # 현재 위치의 절대 좌표
             prev_pos = self._get_pos(self.prev_s)
@@ -212,6 +217,12 @@ class FrozenLakeTextGPT(FrozenLakeEnv):
                             inverted_y = (grid_rows - 1) - y
                             raw_prev_reward = rewards[inverted_prev_y][prev_x]
                             raw_reward = rewards[inverted_y][x]
+                            
+                            # Convert tensor to float if necessary
+                            if isinstance(raw_reward, torch.Tensor):
+                                raw_reward = raw_reward.item()
+                            if isinstance(raw_prev_reward, torch.Tensor):
+                                raw_prev_reward = raw_prev_reward.item()
                             
                             # Handle NaN/Inf values
                             if raw_reward is None or np.isnan(raw_reward) or np.isinf(raw_reward):
@@ -431,11 +442,16 @@ class StatsRecorder(Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self._length += 1
+        
+        # Convert reward to float if it's a tensor
+        if isinstance(reward, torch.Tensor):
+            reward = reward.item()
+            
         self._reward += reward
         done = terminated or truncated
         if done:
             is_success = info.get('is_success', False)
-            self._stats = {'length': self._length, 'reward': round(self._reward, 1), 'is_success': is_success}
+            self._stats = {'length': self._length, 'reward': round(float(self._reward), 1), 'is_success': is_success}
             self._save()
         return obs, reward, terminated, truncated, info
 
@@ -444,7 +460,7 @@ class StatsRecorder(Wrapper):
         self._file.flush()
 
 
-def make_frozen_env_potential(
+def make_frozen_env_gpt(
     outdir,
     area=8, # 8x8
     fov=1,
@@ -456,7 +472,9 @@ def make_frozen_env_potential(
     seed=None,
     save_stats=False,
     first_person=True,
-    gamma=0.99
+    gamma=0.99,
+    reward_map="GPT",
+    env_idx=-1
 ):   
     def resize_obs(obs):
         obs = torch.from_numpy(obs).permute(2, 0, 1)
@@ -465,7 +483,7 @@ def make_frozen_env_potential(
         return obs
     
     def frozen_thunk():
-        frozen_env = gym.make('FrozenLakeText-Potential-v0', map_size=area, is_slippery=is_slippery, seed=seed, fov=fov, fixed_orientation=fixed_orientation, max_episode_steps=100, first_person=first_person, gamma=gamma)
+        frozen_env = gym.make('FrozenLakeText-GPT-v0', map_size=area, is_slippery=is_slippery, seed=seed, fov=fov, fixed_orientation=fixed_orientation, max_episode_steps=100, first_person=first_person, gamma=gamma, reward_map=reward_map, env_idx=env_idx)
         frozen_env = VisualObsWrapper(frozen_env, transform=resize_obs)
         if save_video:
             frozen_env = RecordVideo(frozen_env, video_folder=outdir, episode_trigger=lambda ix: ix % save_video_every == 0)

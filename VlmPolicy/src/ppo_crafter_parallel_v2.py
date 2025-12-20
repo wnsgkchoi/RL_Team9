@@ -37,6 +37,7 @@ from environments.crafter_env import make_crafter_env
 from environments.frozen_env import make_frozen_env
 from environments.frozen_env_penalty import make_frozen_env_penalty
 from environments.frozen_env_potential import make_frozen_env_potential
+from environments.frozen_env_gpt import make_frozen_env_gpt
 from environments.hanoi_env import make_hanoi_env
 from environments.minigrid_env import make_minigrid_env
 from PIL import Image
@@ -398,6 +399,46 @@ def instanciate_envs(runs_directory, is_main_process, specifc_env_seed, **kwargs
             for i in range(kwargs['local_num_envs'])
             ]
         )
+    elif kwargs['env_id'] == "FrozenLakeText-GPT-v0":
+        envs = gym.vector.SyncVectorEnv(
+            [make_frozen_env_gpt(
+                runs_directory,
+                area=kwargs['env_area'], # 8x8,
+                fov=kwargs['fov'],
+                seed=specifc_env_seed + i + 1,
+                size=(kwargs['env_size'], kwargs['env_size']),
+                is_slippery=kwargs['is_slippery'],
+                fixed_orientation=kwargs['fixed_orientation'],
+                save_video=False,
+                save_video_every=kwargs['save_video_every'],
+                save_stats=kwargs['save_stats'],
+                first_person=kwargs['first_person'],
+                gamma=kwargs['gamma'],
+                reward_map="GPT",
+                env_idx=i
+            )
+            for i in range(kwargs['local_num_envs'])
+            ]
+        )
+        eval_env_creation_fn = lambda: gym.vector.SyncVectorEnv(
+            [make_frozen_env_gpt(
+                os.path.join(runs_directory, f'eval_video_{i}'),
+                area=kwargs['env_area'],
+                fov=kwargs['fov'],
+                size=(kwargs['env_size'], kwargs['env_size']),
+                is_slippery=kwargs['is_slippery'],
+                fixed_orientation=kwargs['fixed_orientation'],
+                seed=kwargs['seed_eval'] + i,
+                save_video=kwargs['save_video'] and is_main_process,
+                save_video_every=1000000, # Save only the first episode
+                save_stats=False,
+                gamma=kwargs['gamma'],
+                reward_map="GPT",
+                env_idx=i
+            )
+            for i in range(kwargs['local_num_envs'])
+            ]
+        )
     else:
         raise Exception(f'Environment {kwargs["env_id"]} is not supported')
     return envs, eval_env_creation_fn
@@ -495,6 +536,12 @@ def train(args):
 
         args.save_video_every = int(args.save_video_every)
         args.possible_actions_list = args.possible_actions_list.split()
+        
+        # Auto-set reward_map for GPT env
+        if args.env_id == "FrozenLakeText-GPT-v0":
+            args.reward_map = "GPT"
+        elif "reward_map" not in args:
+            args.reward_map = None
 
     # log only on the main process
     if accelerator.is_main_process:
@@ -659,27 +706,38 @@ def train(args):
                     #     grid_size=(args.env_area, args.env_area)
                     # )
 
-                    text_map = envs[env_idx].render_map_ascii(return_string=True)
+                    # Access the inner environment to call render_map_ascii
+                    current_env = envs.envs[env_idx]
+                    while hasattr(current_env, 'env'):
+                        if hasattr(current_env, 'render_map_ascii'):
+                            break
+                        current_env = current_env.env
+                    
+                    if hasattr(current_env, 'render_map_ascii'):
+                        text_map = current_env.render_map_ascii(return_string=True)
+                    else:
+                        print(f"[WARNING] Env {env_idx} does not support render_map_ascii. Using empty map.")
+                        text_map = ""
 
-                    rewards = evaluator.run_text(
+                    gpt_rewards = evaluator.run_text(
                         text_map=text_map,
                         grid_size=(args.env_area, args.env_area)
                     )
                     
                     # Validate and log reward map
-                    print(f"[RewardMap] Env {env_idx} - Shape: {len(rewards)}x{len(rewards[0])}")
-                    rewards_array = np.array(rewards)
+                    print(f"[RewardMap] Env {env_idx} - Shape: {len(gpt_rewards)}x{len(gpt_rewards[0])}")
+                    rewards_array = np.array(gpt_rewards)
                     print(f"[RewardMap] Env {env_idx} - Stats: min={rewards_array.min():.3f}, max={rewards_array.max():.3f}, mean={rewards_array.mean():.3f}")
                     
                     # Check for invalid values
                     if np.isnan(rewards_array).any():
                         print(f"[WARNING] Env {env_idx} - NaN values detected in reward map! Replacing with 0")
-                        rewards = np.nan_to_num(rewards_array, nan=0.0).tolist()
+                        gpt_rewards = np.nan_to_num(rewards_array, nan=0.0).tolist()
                     if np.isinf(rewards_array).any():
                         print(f"[WARNING] Env {env_idx} - Inf values detected in reward map! Clipping")
-                        rewards = np.clip(rewards_array, -1.0, 1.0).tolist()
+                        gpt_rewards = np.clip(rewards_array, -1.0, 1.0).tolist()
                     
-                    reward_maps.set_reward_map(env_idx, rewards)
+                    reward_maps.set_reward_map(env_idx, gpt_rewards)
                     generated_count += 1
                 else:
                     print(f"[RewardMap] Using cached reward map for env {env_idx}")
